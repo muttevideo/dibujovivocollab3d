@@ -1,0 +1,22 @@
+{
+  "name": "dibujovivo3d",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lienzo 3D colaborativo de trazos neon",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node tests/browser.cjs && node tests/output-browser.cjs && node tests/input-browser.cjs"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "express": "5.2.1",
+    "socket.io": "4.8.4",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "4.8.4",
+    "@playwright/test": "1.63.0"
+  }
+}

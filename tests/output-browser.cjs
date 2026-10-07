@@ -1,0 +1,55 @@
+'use strict';
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const { chromium } = require('@playwright/test');
+const { io } = require('socket.io-client');
+const { createDrawingServer } = require('../server');
+const emit = (socket, event, data) => new Promise((resolve, reject) => socket.timeout(3000).emit(event, data, (error, response) => error ? reject(error) : resolve(response)));
+(async () => {
+  const server = createDrawingServer();
+  let browser, source;
+  try {
+    await new Promise(resolve => server.server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${server.server.address().port}`;
+    browser = await chromium.launch({ headless: true, args: ['--enable-unsafe-swiftshader'] });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 0.5 });
+    const errors = []; page.on('pageerror', e => errors.push(e.message));
+    await page.goto(`${url}/output3d`);
+    await page.waitForFunction(() => window.__output3d?.connected);
+    assert.equal(await page.locator('header,footer,aside,button,input,.axis').count(), 0);
+    assert.equal((await page.locator('body').innerText()).trim(), '');
+    console.log('PASS output: solo escena, sin ejes, herramientas ni textos');
+    source = io(url, { transports: ['websocket'] });
+    await new Promise(resolve => source.once('scene:snapshot', resolve));
+    const started = await emit(source, 'stroke:start', { id: 'output-check', color: '#ff36c9', width: 0.12, point: [-4, 0, 0] });
+    assert.equal(started.ok, true);
+    const points = Array.from({ length: 40 }, (_, i) => [-4 + (i + 1) * 0.2, Math.sin((i + 1) * 0.18) * 1.4, 0]);
+    await emit(source, 'stroke:append', { id: 'output-check', points });
+    await emit(source, 'stroke:end', { id: 'output-check' });
+    await page.waitForFunction(() => window.__output3d.strokes[0]?.points.length === 41 && window.__output3d.strokes[0]?.ended);
+    const state = await page.evaluate(() => window.__output3d.strokes);
+    assert.deepEqual(state[0].points, [[-4,0,0], ...points]);
+    console.log('PASS output: replica 41 puntos reales por sockets');
+    await page.reload(); await page.waitForFunction(() => window.__output3d?.connected && window.__output3d.strokeCount === 1);
+    assert.deepEqual(await page.evaluate(() => window.__output3d.strokes), state);
+    const before = await page.evaluate(() => window.__output3d.camera.position.toArray());
+    await page.mouse.move(400,300); await page.mouse.down(); await page.mouse.move(900,400); await page.mouse.up();
+    assert.deepEqual(await page.evaluate(() => window.__output3d.camera.position.toArray()), before);
+    assert.equal(await page.evaluate(() => window.__output3d.strokeCount), 1);
+    console.log('PASS output: reconecta con contexto; mouse no dibuja ni mueve camara');
+    await page.waitForFunction(() => window.__output3d.scene.children.some(o => o.children.some(c => c.isMesh)));
+    fs.mkdirSync(path.join(__dirname, '../test-results'), { recursive: true });
+    await page.screenshot({ path: path.join(__dirname, '../test-results/output3d.png') });
+    await page.waitForFunction(() => window.__output3d.strokeCount === 0, null, { timeout: 11000 });
+    console.log('PASS output: respeta desaparicion de los trazos a los 10 segundos');
+    await emit(source, 'stroke:start', { id: 'output-clear', color: '#36eeff', width: 0.1, point: [0,0,0] });
+    await page.waitForFunction(() => window.__output3d.strokeCount === 1);
+    await emit(source, 'scene:clear', null);
+    await page.waitForFunction(() => window.__output3d.strokeCount === 0);
+    assert.deepEqual(errors, []);
+    console.log('PASS output: limpieza compartida, sin errores JavaScript');
+  } finally {
+    source?.disconnect(); await browser?.close(); await server.close();
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

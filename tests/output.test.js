@@ -1,0 +1,22 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { createDrawingServer } = require('../server');
+test('output3d sirve una salida dedicada sin herramientas ni ejes', async t => {
+  const instance = createDrawingServer();
+  await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => instance.close());
+  const response = await fetch(`http://127.0.0.1:${instance.server.address().port}/output3d`);
+  const html = await response.text();
+  assert.equal(response.status, 200, 'la salida /output3d debe existir');
+  assert.match(html, /output3d\.js/);
+  assert.match(html, /canvas/);
+  assert.doesNotMatch(html, /id="(?:width|depth|draw-mode|orbit-mode)"|class="axis"|AxesHelper/);
+  const source = fs.readFileSync(path.join(__dirname, '../public/output3d.js'), 'utf8');
+  for (const event of ['scene:snapshot', 'stroke:started', 'stroke:appended', 'stroke:ended', 'stroke:removed', 'scene:cleared']) assert.ok(source.includes(event), event);
+  assert.doesNotMatch(source, /\.emit\(|AxesHelper|GridHelper|OrbitControls|pointerdown/);
+  assert.match(source, /strokeOpacity/);
+  assert.match(source, /taperRadius/);
+});

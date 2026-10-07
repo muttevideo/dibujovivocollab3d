@@ -1,0 +1,121 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { io: client } = require('socket.io-client');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.join(__dirname, '..');
+const once = (socket, event) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`Timeout: ${event}`)), 4000);
+  socket.once(event, data => { clearTimeout(timer); resolve(data); });
+});
+const emit = (socket, event, data) => new Promise((resolve, reject) => {
+  socket.timeout(3000).emit(event, data, (error, response) => error ? reject(error) : resolve(response));
+});
+async function fixture(t) {
+  assert.ok(fs.existsSync(path.join(root, 'server.js')), 'server.js debe existir');
+  const { createDrawingServer } = require('../server.js');
+  const app = createDrawingServer();
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${app.server.address().port}`;
+  const clients = [];
+  t.after(async () => { clients.forEach(s => s.disconnect()); await app.close(); });
+  return { ...app, url, async connect() {
+    const socket = client(url, { autoConnect: false, transports: ['websocket'], reconnection: false });
+    clients.push(socket);
+    const snapshot = once(socket, 'scene:snapshot'); socket.connect();
+    return { socket, snapshot: await snapshot };
+  }};
+}
+test('entrega el mismo contexto y presencia a clientes nuevos', async t => {
+  const f = await fixture(t);
+  const a = await f.connect();
+  const b = await f.connect();
+  assert.deepEqual(a.snapshot.strokes, []);
+  assert.equal(b.snapshot.users.length, 2);
+  assert.equal(a.snapshot.seed, b.snapshot.seed);
+  assert.equal(a.snapshot.startedAt, b.snapshot.startedAt);
+  const health = await (await fetch(`${f.url}/api/health`)).json();
+  assert.equal(health.users, 2);
+  assert.equal(health.ok, true);
+  const privateResponse = await fetch(`${f.url}/server.js`);
+  assert.equal(privateResponse.status, 404); await privateResponse.text();
+  const vendorResponse = await fetch(`${f.url}/vendor/three/build/three.module.js`);
+  assert.equal(vendorResponse.status, 200); await vendorResponse.text();
+});
+test('replica trazos, puntos y finalizacion; conserva contexto para conexiones tardias', async t => {
+  const f = await fixture(t);
+  const { socket: a } = await f.connect();
+  const { socket: b } = await f.connect();
+  const received = once(b, 'stroke:started');
+  const id = 'test-stroke-1';
+  assert.equal((await emit(a, 'stroke:start', { id, color: '#ff36c9', width: 0.08, point: [1, 2, 3] })).ok, true);
+  const stroke = await received;
+  assert.equal(stroke.ownerId, a.id);
+  assert.equal(stroke.id, id);
+  assert.equal(stroke.expiresAt - stroke.createdAt, 10000);
+  const pointsReceived = once(b, 'stroke:appended');
+  assert.equal((await emit(a, 'stroke:append', { id, points: [[2, 3, 4], [3, 4, 5]] })).ok, true);
+  assert.deepEqual((await pointsReceived).points, [[2, 3, 4], [3, 4, 5]]);
+  const ended = once(b, 'stroke:ended');
+  assert.equal((await emit(a, 'stroke:end', { id })).ok, true);
+  assert.equal((await ended).id, id);
+  const c = await f.connect();
+  assert.equal(c.snapshot.strokes.length, 1);
+  assert.equal(c.snapshot.strokes[0].points.length, 3);
+  assert.equal(c.snapshot.strokes[0].ended, true);
+});
+test('rechaza datos invalidos y cambios de trazos ajenos sin romper el servidor', async t => {
+  const f = await fixture(t);
+  const { socket: a } = await f.connect();
+  const { socket: b } = await f.connect();
+  assert.equal((await emit(a, 'stroke:start', { id: 'bad', color: '#ff36c9', width: 0.08, point: [Infinity, 0, 0] })).ok, false);
+  assert.equal((await emit(a, 'stroke:start', { id: 'bad', color: 'red', width: 0.08, point: [0, 0, 0] })).ok, false);
+  assert.equal((await emit(a, 'stroke:start', null)).ok, false);
+  assert.equal((await emit(a, 'stroke:append', { id: 'missing', points: [[0, 0, 0]] })).ok, false);
+  await emit(a, 'stroke:start', { id: 'owned', color: '#22d3ee', width: 0.08, point: [0, 0, 0] });
+  assert.equal((await emit(b, 'stroke:append', { id: 'owned', points: [[1, 0, 0]] })).ok, false);
+  assert.equal((await emit(b, 'stroke:end', { id: 'owned' })).ok, false);
+  assert.equal((await emit(a, 'stroke:start', { id: 'owned', color: '#22d3ee', width: 0.08, point: [0, 0, 0] })).ok, false);
+  await emit(a, 'stroke:end', { id: 'owned' });
+  assert.equal((await emit(a, 'stroke:append', { id: 'owned', points: [[1, 0, 0]] })).ok, false);
+  assert.equal((await (await fetch(`${f.url}/api/health`)).json()).strokes, 1);
+});
+test('borra automaticamente a los 10 segundos y no restaura trazos vencidos', async t => {
+  const f = await fixture(t);
+  const { socket: a } = await f.connect();
+  const { socket: b } = await f.connect();
+  const removed = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('No desaparecio el trazo a los 10 segundos')), 11500);
+    b.once('stroke:removed', data => { clearTimeout(timer); resolve(data); });
+  });
+  const start = await emit(a, 'stroke:start', { id: 'ephemeral', color: '#a855f7', width: 0.07, point: [0, 0, 0] });
+  await emit(a, 'stroke:end', { id: 'ephemeral' });
+  assert.equal((await removed).id, 'ephemeral');
+  const elapsed = Date.now() - start.stroke.createdAt;
+  assert.ok(elapsed >= 10000 && elapsed < 11500, `duracion: ${elapsed}`);
+  const late = await f.connect();
+  assert.deepEqual(late.snapshot.strokes, []);
+  assert.equal((await (await fetch(`${f.url}/api/health`)).json()).strokes, 0);
+});
+test('deshacer afecta solo trazos propios; limpiar y presencia se comparten', async t => {
+  const f = await fixture(t);
+  const { socket: a } = await f.connect();
+  const { socket: b } = await f.connect();
+  await emit(a, 'stroke:start', { id: 'a-line', color: '#ff36c9', width: 0.08, point: [0, 0, 0] });
+  await emit(a, 'stroke:end', { id: 'a-line' });
+  await emit(b, 'stroke:start', { id: 'b-line', color: '#22d3ee', width: 0.08, point: [0, 0, 0] });
+  await emit(b, 'stroke:end', { id: 'b-line' });
+  const removed = once(b, 'stroke:removed');
+  assert.equal((await emit(a, 'stroke:undo', null)).ok, true);
+  assert.equal((await removed).id, 'a-line');
+  assert.equal((await emit(a, 'stroke:undo', null)).ok, false);
+  const presence = once(b, 'presence:update');
+  assert.equal((await emit(a, 'presence:set', { name: '  Ana  ' })).ok, true);
+  assert.equal((await presence).find(u => u.id === a.id).name, 'Ana');
+  const cleared = once(b, 'scene:cleared');
+  assert.equal((await emit(a, 'scene:clear', null)).ok, true);
+  assert.equal((await cleared).revision, 1);
+  assert.equal((await f.connect()).snapshot.strokes.length, 0);
+});
+module.exports = { fixture, once, emit };

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070709"><title>Trazo — Estudio de dibujo vivo</title>
+<link rel="stylesheet" href="/styles.css">
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+</head>
+<body>
+<main id="workspace">
+<canvas id="canvas" aria-label="Lienzo tridimensional compartido. Arrastra para dibujar; flechas del teclado para orbitar. En touch, selecciona Orbitar y arrastra con un dedo." tabindex="0"></canvas>
+<header class="topbar">
+<a class="brand" href="/" aria-label="Trazo, estudio de dibujo vivo"><span class="brand-mark">t<span>•</span></span><strong>trazo</strong><span class="brand-sub">ESTUDIO VIVO / 3D</span></a>
+<div class="room"><span class="live-dot"></span><span>Sala compartida</span><span class="room-code">01</span></div>
+<div class="collaboration"><div id="presence" aria-label="Participantes conectados"></div><span id="user-count">0 en línea</span><button id="rename" class="icon-button" title="Cambiar tu nombre" aria-label="Cambiar tu nombre">✎</button><span id="connection" role="status" class="connecting">Conectando</span></div>
+</header>
+<aside class="tools" aria-label="Herramientas de dibujo">
+<div class="panel-heading"><span>Tu instrumento</span><button id="collapse-tools" title="Plegar herramientas" aria-label="Plegar herramientas" aria-expanded="true">−</button></div>
+<div id="tool-body">
+<div class="mode-switch" role="group" aria-label="Modo de interacción"><button id="draw-mode" class="active" aria-pressed="true"><span>✎</span> Dibujar <kbd>D</kbd></button><button id="orbit-mode" aria-pressed="false"><span>◎</span> Orbitar <kbd>O</kbd></button></div>
+<section class="tool-section"><div class="label-row"><h2>Color del trazo</h2><span id="color-name">Magenta</span></div><div class="palette" role="group" aria-label="Colores neón"><button class="swatch selected" data-color="#ff36c9" data-name="Magenta" style="--swatch:#ff36c9" aria-label="Magenta" aria-pressed="true"></button><button class="swatch" data-color="#985cff" data-name="Violeta" style="--swatch:#985cff" aria-label="Violeta" aria-pressed="false"></button><button class="swatch" data-color="#36eeff" data-name="Cian" style="--swatch:#36eeff" aria-label="Cian" aria-pressed="false"></button></div><div class="stroke-preview"><span></span><small>NEÓN · TEXTURIZADO</small></div></section>
+<section class="tool-section"><div class="label-row"><label for="width">Grosor</label><output id="width-value" for="width">0.06</output></div><input type="range" id="width" min="0.015" max="0.35" step="0.005" value="0.06"><div class="range-captions"><span>Fino</span><span>Grueso</span></div></section>
+<section class="tool-section"><div class="label-row"><label for="depth">Profundidad</label><output id="depth-value" for="depth">0.0</output></div><input type="range" id="depth" min="-8" max="8" step="0.1" value="0"><div class="range-captions"><span>Cerca</span><span>Lejos</span></div><p class="field-note">Cada trazo vive en un plano distinto.</p></section>
+<div class="panel-divider"></div><div class="object-heading"><span class="mini-orbit">◇</span><div><strong>Forma generativa</strong><small id="mesh-state">En movimiento</small></div><button id="mesh-toggle" class="icon-button" aria-label="Pausar forma generativa" aria-pressed="false" title="Pausar forma generativa">Ⅱ</button></div>
+<div class="panel-actions"><button id="reset-camera"><span>⌖</span> Centrar vista</button><button id="undo" disabled><span>↶</span> Deshacer mi trazo <kbd>⌘ Z</kbd></button></div>
+<div class="panel-divider"></div><div class="export-row"><button id="export-png" title="Guardar imagen PNG">↗ Imagen</button><button id="export-json" title="Guardar escena JSON">↓ Escena</button></div><button id="clear" class="danger" disabled>Limpiar sala compartida</button>
+</div>
+<div class="panel-foot"><span class="live-dot"></span> Luz efímera · trazos de 10 s</div>
+</aside>
+<div class="canvas-title"><span class="eyebrow">UN LIENZO. INFINITAS DIMENSIONES.</span><h1>Dibuja más allá<br>del papel<span> .</span></h1><p id="intro">Arrastra para dejar luz en el espacio.<br>Construye algo con quienes están aquí.</p></div>
+<div class="view-badge"><span class="axis"><i>X</i><i>Y</i><i>Z</i></span><span>PERSPECTIVA <b>3D</b></span></div>
+<div id="draw-indicator" hidden>● Dibujando en el espacio</div>
+<footer class="bottom-bar"><div class="shortcuts"><span><kbd>Arrastrar</kbd> dibujar</span><span><kbd>↑ ↓ ← →</kbd> orbitar</span><span><kbd>Rueda</kbd> zoom</span><span><kbd>Espacio</kbd> orbitar</span></div><div class="scene-stats"><span id="stroke-count">0 trazos</span><span class="separator">/</span><span>ESPACIO COMPARTIDO</span></div></footer>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="fatal" role="alert" hidden><span>◇</span><h1>No podemos abrir el lienzo 3D.</h1><p>Activa la aceleración gráfica o prueba un navegador compatible con WebGL 2.</p><button onclick="location.reload()">Volver a intentar</button></div>
+<noscript><div class="noscript">Activa JavaScript para entrar al estudio de dibujo 3D.</div></noscript>
+</main>
+<script src="/socket.io/socket.io.js"></script><script type="module" src="/app.js"></script>
+</body></html>
